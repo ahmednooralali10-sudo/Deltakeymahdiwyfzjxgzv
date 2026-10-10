@@ -1,6 +1,6 @@
 """
-LootLabs / Loot-Link bypass — Flask API for Vercel.
-Single-file serverless handler. All logic ported from original CLI.
+LootLabs / Loot-Link bypass — Flask API + Web UI for Vercel.
+Single-file: HTML interface + bypass endpoint.
 """
 import json
 import random
@@ -17,7 +17,7 @@ import zlib
 from urllib.parse import urlparse
 
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 
 try:
     import brotli
@@ -34,6 +34,447 @@ except ImportError:
 
 
 app = Flask(__name__)
+
+
+# ============================================================
+# HTML INTERFACE (embedded)
+# ============================================================
+INDEX_HTML = r"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LootLabs Bypass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #0a0608;
+    --panel: rgba(20, 12, 14, 0.72);
+    --border: rgba(255, 60, 80, 0.28);
+    --accent: #ff3c50;
+    --accent-soft: #ff6b7d;
+    --text: #f2eef0;
+    --muted: #8a7f83;
+    --success: #4ade80;
+    --error: #ff5555;
+  }
+  html, body {
+    height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Cairo', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: -40%;
+    background:
+      radial-gradient(circle at 20% 20%, rgba(255, 60, 80, 0.18), transparent 55%),
+      radial-gradient(circle at 80% 80%, rgba(180, 20, 60, 0.22), transparent 55%),
+      radial-gradient(circle at 50% 50%, rgba(90, 20, 40, 0.15), transparent 60%);
+    animation: drift 24s ease-in-out infinite alternate;
+    z-index: -1;
+    filter: blur(40px);
+  }
+  @keyframes drift {
+    0%   { transform: translate(0, 0) scale(1); }
+    100% { transform: translate(4%, -3%) scale(1.15); }
+  }
+
+  .wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .card {
+    width: 100%;
+    max-width: 720px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 36px 32px 28px;
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.03) inset,
+      0 30px 80px rgba(255, 20, 60, 0.08),
+      0 8px 32px rgba(0, 0, 0, 0.55);
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.7;
+  }
+
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .logo {
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--accent), #a01028);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 0 24px rgba(255, 60, 80, 0.35);
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+  }
+  h1 span { color: var(--accent); }
+  .sub {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+    font-weight: 400;
+  }
+
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .input-row {
+    position: relative;
+    display: flex;
+    gap: 10px;
+  }
+  textarea, input[type="text"] {
+    flex: 1;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text);
+    border-radius: 12px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    resize: none;
+    transition: all 0.2s;
+    outline: none;
+    min-height: 52px;
+    max-height: 140px;
+    direction: ltr;
+    text-align: left;
+    line-height: 1.5;
+  }
+  textarea:focus, input[type="text"]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(255, 60, 80, 0.12);
+    background: rgba(0, 0, 0, 0.55);
+  }
+  textarea::placeholder {
+    color: rgba(255, 255, 255, 0.2);
+  }
+
+  .btn {
+    border: none;
+    border-radius: 12px;
+    padding: 14px 24px;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent), #c41030);
+    color: white;
+    width: 100%;
+    margin-top: 8px;
+    box-shadow: 0 8px 24px rgba(255, 60, 80, 0.25);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 12px 32px rgba(255, 60, 80, 0.4);
+    filter: brightness(1.1);
+  }
+  .btn-primary:active:not(:disabled) { transform: translateY(0); }
+  .btn-primary:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  .btn-ghost {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: var(--text);
+    padding: 12px 18px;
+  }
+  .btn-ghost:hover { background: rgba(255, 255, 255, 0.1); }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn.loading .spinner { display: block; }
+  .btn.loading .label { display: none; }
+  .btn .label { display: inline; }
+
+  .result {
+    margin-top: 22px;
+    border-radius: 12px;
+    padding: 0;
+    max-height: 0;
+    overflow: hidden;
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    opacity: 0;
+  }
+  .result.show {
+    max-height: 500px;
+    opacity: 1;
+    padding: 16px;
+  }
+  .result.success {
+    background: rgba(74, 222, 128, 0.08);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+  }
+  .result.error {
+    background: rgba(255, 85, 85, 0.08);
+    border: 1px solid rgba(255, 85, 85, 0.25);
+  }
+  .result-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .result.success .result-head { color: var(--success); }
+  .result.error .result-head { color: var(--error); }
+  .result-body {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    word-break: break-all;
+    direction: ltr;
+    text-align: left;
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.3);
+    padding: 12px;
+    border-radius: 8px;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .result-body::-webkit-scrollbar { width: 6px; }
+  .result-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 60, 80, 0.4);
+    border-radius: 3px;
+  }
+
+  .meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    direction: ltr;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(20, 12, 14, 0.95);
+    border: 1px solid var(--border);
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    opacity: 0;
+    transition: all 0.25s;
+    pointer-events: none;
+    z-index: 1000;
+    backdrop-filter: blur(10px);
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .footer {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media (max-width: 520px) {
+    .card { padding: 24px 20px 20px; border-radius: 16px; }
+    h1 { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="brand">
+      <div class="logo">🔓</div>
+      <h1>LootLabs <span>Bypass</span></h1>
+    </div>
+    <p class="sub">الصق رابط LootLabs / Loot-Link وشوف النتيجة النهائية</p>
+
+    <div class="field">
+      <label for="url">الرابط</label>
+      <div class="input-row">
+        <textarea id="url" placeholder="https://loot-link.com/s?xxxxx&data=..." spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="input-row" style="margin-bottom: 6px;">
+      <button class="btn btn-ghost" onclick="pasteFromClipboard()" type="button">📋 لصق</button>
+      <button class="btn btn-ghost" onclick="document.getElementById('url').value=''" type="button">🗑 مسح</button>
+    </div>
+
+    <button id="submitBtn" class="btn btn-primary" onclick="runBypass()">
+      <span class="spinner"></span>
+      <span class="label">🚀 تخطي الرابط</span>
+    </button>
+
+    <div id="result" class="result">
+      <div class="result-head">
+        <span id="resultTitle">النتيجة</span>
+        <button class="btn btn-ghost" style="padding: 4px 10px; font-size: 11px;" onclick="copyResult()">نسخ</button>
+      </div>
+      <div id="resultBody" class="result-body"></div>
+      <div class="meta">
+        <span id="resultMeta"></span>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>ALPHA XK build</span>
+      <span id="status">جاهز</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  let lastResult = '';
+
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(t._t);
+    t._t = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  async function pasteFromClipboard() {
+    try {
+      const text = await navigator.clipboard.readText();
+      $('url').value = text.trim();
+      toast('تم اللصق ✓');
+    } catch {
+      toast('ما قدرت أقرأ الحافظة');
+    }
+  }
+
+  function showResult(success, text, meta = '') {
+    const box = $('result');
+    box.classList.remove('success', 'error');
+    box.classList.add('show', success ? 'success' : 'error');
+    $('resultTitle').textContent = success ? '✓ تم التخطي بنجاح' : '✗ فشل التخطي';
+    $('resultBody').textContent = text;
+    $('resultMeta').textContent = meta;
+    lastResult = text;
+  }
+
+  async function copyResult() {
+    if (!lastResult) return;
+    try {
+      await navigator.clipboard.writeText(lastResult);
+      toast('تم النسخ ✓');
+    } catch {
+      toast('فشل النسخ');
+    }
+  }
+
+  async function runBypass() {
+    const url = $('url').value.trim();
+    if (!url) { toast('الصق رابط أول'); return; }
+    if (!/^https?:\/\//i.test(url)) { toast('الرابط غير صالح'); return; }
+
+    const btn = $('submitBtn');
+    btn.disabled = true;
+    btn.classList.add('loading');
+    $('status').textContent = 'يعالج...';
+    const start = Date.now();
+
+    try {
+      const res = await fetch('/api/bypass', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
+      const data = await res.json();
+      const dur = ((Date.now() - start) / 1000).toFixed(2);
+
+      if (data.success && data.result) {
+        showResult(true, data.result, `⏱ ${dur}s`);
+        $('status').textContent = 'تم';
+      } else {
+        showResult(false, data.error || data.result || 'خطأ غير معروف', `⏱ ${dur}s`);
+        $('status').textContent = 'فشل';
+      }
+    } catch (err) {
+      showResult(false, 'Network error: ' + err.message, '');
+      $('status').textContent = 'خطأ شبكة';
+    } finally {
+      btn.disabled = false;
+      btn.classList.remove('loading');
+    }
+  }
+
+  $('url').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) runBypass();
+  });
+</script>
+</body>
+</html>"""
 
 
 # ============================================================
@@ -451,11 +892,7 @@ def OG_getDest(url):
 # ============================================================
 @app.route("/", methods=["GET"])
 def index():
-    return jsonify({
-        "name": "LootLabs Bypass API",
-        "usage": "POST /api/bypass with JSON {url: 'https://loot-link.com/...'}",
-        "built_by": "ALPHA XK",
-    })
+    return Response(INDEX_HTML, mimetype="text/html")
 
 
 @app.route("/api/bypass", methods=["POST", "OPTIONS"])
@@ -499,6 +936,5 @@ def bypass_endpoint():
     return response
 
 
-# For local testing
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
